@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>oscilón</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/addons/p5.sound.min.js"></script>
+  <style>
+    body { margin: 0; background: black; overflow: hidden; }
+    canvas { display: block; }
+    #ui {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      z-index: 20;
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      pointer-events: none;
+    }
+    #nav-container {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      right: 0;
+      display: flex;
+      align-items: center;
+      z-index: 10;
+      white-space: nowrap;
+    }
+    .site-title {
+      font-family: 'Helvetica Neue', sans-serif;
+      font-weight: 500;
+      font-style: italic;
+      font-size: 16px;
+      flex-shrink: 0;
+      color: white;
+    }
+    #nav-bar {
+      display: flex;
+      overflow-x: auto;
+      gap: 24px;
+      font-family: 'Courier New', monospace;
+      font-size: 16px;
+      color: white;
+      flex-grow: 1;
+      margin-left: 24px;
+      padding-right: 24px;
+    }
+    .nav-item {
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    #nav-bar div {
+      color: #f2f2f2;
+      text-decoration: none;
+      opacity: 0.8;
+      transition: opacity 0.2s ease;
+      flex-shrink: 0;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    #nav-bar div:hover {
+      opacity: 1;
+    }
+    #nav-scroll::-webkit-scrollbar {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="nav-container">
+    <div class="site-title" id="bloom">bloom effect</div>
+    <div id="nav-bar">
+      <div class="nav-item track-btn" data-track="luna">luna</div>
+      <div class="nav-item track-btn" data-track="hide">hide</div>
+      <div class="nav-item track-btn" data-track="suspendo">suspendo</div>
+      <div class="nav-item track-btn" data-track="second-sight">second sight</div>
+      <div class="nav-item track-btn" data-track="itero">itero</div>
+      <div class="nav-item track-btn" data-track="surreal">surreal</div>
+    </div>
+  </div>
+
+  <script>
+    let t = 0, baseRadius, trails = [[], [], []], ribbonConfigs = [], rot = { x: 0, y: 0, z: 0 };
+    let fft, amplitude, sound = null, started = false, configGenerated = false;
+    let energy = { bass: 0, mid: 0, treble: 0 };
+    let rotSpeed = { x: 0, y: 0, z: 0 };
+
+    const tracks = {
+      luna: 'audio/luna.mp3', hide: 'audio/hide.mp3', suspendo: 'audio/suspendo.mp3',
+      'second-sight': 'audio/second-sight.mp3', itero: 'audio/itero.mp3', surreal: 'audio/surreal.mp3'
+    };
+
+    const ribbonData = {
+  "hide": {
+    "centroid": 24.715488473229346,
+    "spread": 31.2459754255009,
+    "flatness": 0.12140604456198192,
+    "rms": 0.28264483025849385,
+    "low": 15.569961456047498,
+    "mid": 2.5651720359835273,
+    "high": 0.13824751453740605
+  },
+  "itero": {
+    "centroid": 25.692941548348024,
+    "spread": 33.592476167169366,
+    "flatness": 0.1446670517341344,
+    "rms": 0.31824353125331306,
+    "low": 18.15110572721419,
+    "mid": 2.7444907787637836,
+    "high": 0.2253739393800613
+  },
+  "luna": {
+    "centroid": 30.36851081959826,
+    "spread": 39.912157790940725,
+    "flatness": 0.2022446930302476,
+    "rms": 0.2774228195746725,
+    "low": 15.235847383145417,
+    "mid": 2.416942609940318,
+    "high": 0.3145000971706271
+  },
+  "second-sight": {
+    "centroid": 25.007317850243457,
+    "spread": 31.60089163761226,
+    "flatness": 0.12167046287344438,
+    "rms": 0.2844214622419555,
+    "low": 15.706406150384934,
+    "mid": 2.4993343108841457,
+    "high": 0.17061212632340772
+  },
+  "surreal": {
+    "centroid": 29.885646222330315,
+    "spread": 38.68793688101655,
+    "flatness": 0.19333259303878994,
+    "rms": 0.2837126686508103,
+    "low": 15.541956247660336,
+    "mid": 2.6866489258036923,
+    "high": 0.303139333340616
+  },
+  "suspendo": {
+    "centroid": 27.62032027348435,
+    "spread": 35.91372323834472,
+    "flatness": 0.1628549586363046,
+    "rms": 0.3247947493774956,
+    "low": 18.1225218101943,
+    "mid": 3.151553585513808,
+    "high": 0.2279603182515108
+  }
+};
+
+
+    function setup() {
+      createCanvas(windowWidth, windowHeight, WEBGL);
+      noFill();
+      baseRadius = min(windowWidth, windowHeight) * 0.3;
+      fft = new p5.FFT();
+      amplitude = new p5.Amplitude();
+    }
+
+    document.querySelectorAll('.track-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        userStartAudio().then(() => {
+          const track = btn.dataset.track;
+          loadAndPlaySound(tracks[track]);
+        });
+      });
+    });
+
+    document.getElementById('bloom').addEventListener('click', () => {
+      const keys = Object.keys(tracks);
+      const random = keys[Math.floor(Math.random() * keys.length)];
+      userStartAudio().then(() => loadAndPlaySound(tracks[random]));
+    });
+
+    function loadAndPlaySound(path) {
+  if (sound && sound.isPlaying()) sound.stop();
+  configGenerated = false;
+  t = 0;
+  trails = [[], [], []];
+
+  const key = path.replace('audio/', '').replace('.mp3', '');
+  currentTrack = key; // ✅ set it here
+  const data = ribbonData[key];
+  console.log('Selected track config:', key, data);
+
+console.log('centroid:', data.centroid);
+console.log('spread:', data.spread);
+console.log('flatness:', data.flatness);
+
+rotSpeed = {
+  x: map(data.centroid, 24, 32, 0.001, 0.006),
+  y: map(data.spread, 30, 42, 0.001, 0.004),
+  z: map(data.flatness, 0.12, 0.21, 0.001, 0.0035)
+};
+
+// Optional: reverse direction or add variation
+if (data.rms > 0.3) rotSpeed.x *= -1;
+if (data.low > 17) rotSpeed.y *= -1;
+
+
+  ribbonConfigs = [];
+for (let i = 0; i < 3; i++) {
+  ribbonConfigs.push({
+    offset: i * 1.5,
+    loopX: baseRadius * map(data.centroid, 24, 32, 0.8, 1.3),
+    loopY: baseRadius * map(data.spread, 30, 42, 0.6, 1.2),
+    loopZ: baseRadius * map(data.flatness, 0.12, 0.21, 0.7, 1.1)
+  });
+}
+
+
+  rot.x = 0; rot.y = 0; rot.z = 0;
+
+  loadSound(path, s => {
+    sound = s;
+    sound.play();
+    started = true;
+    configGenerated = true;
+  });
+}
+
+
+
+
+    function draw() {
+      background(0);
+      if (!started) return;
+
+      fft.analyze();
+      energy.bass = lerp(energy.bass, fft.getEnergy("bass"), 0.05);
+      energy.mid = lerp(energy.mid, fft.getEnergy("mid"), 0.05);
+      energy.treble = lerp(energy.treble, fft.getEnergy("treble"), 0.05);
+
+      if (configGenerated) {
+  const centroid = fft.getCentroid();
+  const bass = fft.getEnergy("bass");
+  const mid = fft.getEnergy("mid");
+  const treble = fft.getEnergy("treble");
+
+  // Live audio-based rotation speeds
+  const speedX = map(centroid, 300, 3000, 0.001, 0.006);
+  const speedY = map(bass, 0, 255, 0.001, 0.004);
+  const speedZ = map(treble, 0, 255, 0.001, 0.0035);
+
+  rot.x += speedX * (bass > 180 ? -1 : 1);
+rot.y += speedY * (mid > 130 ? -1 : 1);
+rot.z += speedZ * (centroid > 1500 ? -1 : 1);
+
+}
+
+
+
+      rotateX(rot.x); rotateY(rot.y); rotateZ(rot.z);
+      const col = [242, 242, 242];
+      renderRibbon(trails[0], t + ribbonConfigs[0].offset, ribbonConfigs[0], energy.bass, col);
+      renderRibbon(trails[1], -t + ribbonConfigs[1].offset, ribbonConfigs[1], energy.mid, col);
+      renderRibbon(trails[2], t + ribbonConfigs[2].offset, ribbonConfigs[2], energy.treble, col);
+      t = (t + 0.02) % TWO_PI;
+      rot.x += rotSpeed.x;
+rot.y += rotSpeed.y;
+rot.z += rotSpeed.z;
+
+    }
+
+    function renderRibbon(trails, localT, config, bandEnergy, baseColor) {
+  const { loopX, loopY, loopZ } = config;
+
+  // Log config on first run for debugging
+  if (trails.length === 0) {
+    console.log('Config:', config);
+  }
+
+  const p1 = {
+    x: loopX * cos(localT),
+    y: loopY * sin(localT),
+    z: loopZ * sin(localT * 2)
+  };
+
+  const p2 = {
+    x: loopX * cos(localT + PI / 2),
+    y: loopY * sin(localT + PI / 2),
+    z: loopZ * sin((localT + PI / 2) * 2)
+  };
+
+  let mx = (p1.x + p2.x) / 2;
+  let my = (p1.y + p2.y) / 2;
+  let mz = (p1.z + p2.z) / 2;
+
+  let dx = p2.y - p1.y;
+  let dy = -(p2.x - p1.x);
+  let dz = sin(localT) * 30;
+  let len = sqrt(dx * dx + dy * dy + dz * dz);
+  dx /= len;
+  dy /= len;
+  dz /= len;
+
+  const bend = map(bandEnergy, 0, 255, 50, 120);
+
+  mx += dx * bend;
+  my += dy * bend;
+  mz += dz * 20;
+
+  trails.push({ p1, p2, m: { x: mx, y: my, z: mz } });
+  if (trails.length > 80) trails.shift();
+
+  for (let i = 0; i < trails.length; i++) {
+    const { p1, p2, m } = trails[i];
+    const alpha = map(i, 0, trails.length, 10, 255);
+    const weight = map(i, 0, trails.length, 0.5, 1.8);
+    strokeWeight(weight);
+    stroke(baseColor[0], baseColor[1], baseColor[2], alpha);
+    beginShape();
+    vertex(p1.x, p1.y, p1.z);
+    quadraticVertex(m.x, m.y, m.z, p2.x, p2.y, p2.z);
+    endShape();
+  }
+}
+
+  </script>
+</body>
+</html>
